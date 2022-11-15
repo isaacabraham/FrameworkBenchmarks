@@ -1,4 +1,4 @@
-namespace App
+module App
 
 [<AutoOpen>]
 module Common =
@@ -22,8 +22,8 @@ module Common =
 
     let FortuneComparer =
         {
-            new IComparer<Fortune> with
-                member __.Compare (a, b) =
+            new IComparer<_> with
+                member _.Compare (a, b) =
                     String.CompareOrdinal(a.message, b.message)
         }
 
@@ -36,7 +36,7 @@ module HtmlViews =
             title []  [ rawText "Fortunes" ]
         ]
 
-    let private layout (content: XmlNode list) =
+    let private layout content =
         html [] [
             fortunesHead
             body [] content
@@ -48,17 +48,17 @@ module HtmlViews =
             th [] [ rawText "message" ]
         ]
 
-    let fortunes (fortunes: Fortune seq) =
-        [
+    let fortunes fortunes =
+        layout [
             table [] [
-                yield fortunesTableHeader
-                for f in fortunes ->
+                fortunesTableHeader
+                for f in fortunes do
                     tr [] [
-                        td [] [ rawText <| string f.id ]
-                        td [] [ encodedText <| f.message ]
+                        td [] [ rawText (string f.id) ]
+                        td [] [ encodedText f.message ]
                     ]
             ]
-        ] |> layout
+        ]
 
 [<RequireQualifiedAccess>]
 module HttpHandlers =
@@ -78,7 +78,7 @@ module HttpHandlers =
         fun _ ctx ->
             task {
                 use conn = new NpgsqlConnection(ConnectionString)
-                let! data = conn.QueryAsync<Fortune>("SELECT id, message FROM fortune")
+                let! data = conn.QueryAsync<Fortune> "SELECT id, message FROM fortune"
 
                 let view =
                     let xs = data.AsList()
@@ -92,58 +92,49 @@ module HttpHandlers =
                 return! ctx.WriteBytesAsync bytes
             }
 
-    let endpoints : Endpoint list =
-        [
-            route "/plaintext" (text "Hello, World!")
-            route "/json" (json {| message = "Hello, World!" |})
-            route "/fortunes" fortunes
-        ]
+    let endpoints = [
+        route "/plaintext" (text "Hello, World!")
+        route "/json" (json {| message = "Hello, World!" |})
+        route "/fortunes" fortunes
+    ]
 
 
-module Main =
-    open Microsoft.AspNetCore.Builder
-    open Microsoft.AspNetCore.Hosting
-    open Microsoft.Extensions.DependencyInjection
-    open Giraffe
-    open Giraffe.EndpointRouting
-    open Microsoft.Extensions.Hosting
-    open Microsoft.Extensions.Logging
+open Microsoft.AspNetCore.Builder
+open Microsoft.Extensions.DependencyInjection
+open Giraffe
+open Giraffe.EndpointRouting
+open Microsoft.Extensions.Hosting
+open Microsoft.Extensions.Logging
 
-    [<EntryPoint>]    
-    let main args =
-        let jsonMode =
-            match args with
-            | [| "newtonsoft" |] -> Newtonsoft
-            | [| "utf8" |]       -> Utf8
-            | _                  -> System
+[<EntryPoint>]
+let main args =
+    let jsonMode =
+        match args with
+        | [| "newtonsoft" |] -> Newtonsoft
+        | [| "utf8" |]       -> Utf8
+        | _                  -> System
 
-        printfn $"Running with %A{jsonMode} JSON serializer"
+    printfn $"Running with %A{jsonMode} JSON serializer"
 
-        let jsonSerializer =
-            match jsonMode with
-            | System ->
-                SystemTextJson.Serializer(SystemTextJson.Serializer.DefaultOptions)
-                :> Json.ISerializer
-            | Utf8 ->
-                Utf8Json.Serializer(Utf8Json.Serializer.DefaultResolver)
-                :> Json.ISerializer
-            | Newtonsoft ->
-                NewtonsoftJson.Serializer(NewtonsoftJson.Serializer.DefaultSettings)
-                :> Json.ISerializer
+    let jsonSerializer: Json.ISerializer =
+        match jsonMode with
+        | System -> SystemTextJson.Serializer SystemTextJson.Serializer.DefaultOptions
+        | Utf8 -> Utf8Json.Serializer Utf8Json.Serializer.DefaultResolver
+        | Newtonsoft -> NewtonsoftJson.Serializer NewtonsoftJson.Serializer.DefaultSettings
 
-        let builder = WebApplication.CreateBuilder(args)
+    let builder = WebApplication.CreateBuilder args
 
-        builder.Services
-            .AddSingleton(jsonSerializer)
-            .AddGiraffe() |> ignore
-            
-        builder.Logging.ClearProviders() |> ignore
+    builder.Services
+        .AddSingleton(jsonSerializer)
+        .AddGiraffe() |> ignore
 
-        let app = builder.Build()
+    builder.Logging.ClearProviders() |> ignore
 
-        app.UseRouting()
-           .UseGiraffe HttpHandlers.endpoints |> ignore
+    let app = builder.Build()
 
-        app.Run()
-        
-        0
+    app.UseRouting()
+       .UseGiraffe HttpHandlers.endpoints |> ignore
+
+    app.Run()
+
+    0
